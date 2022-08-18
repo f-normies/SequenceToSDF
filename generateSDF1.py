@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Created on Tue Mar 16 19:15:08 2021
 
@@ -16,23 +15,36 @@ import sys
 import copy
 import pandas as pd
 
-def isCorrectSequence(seq):
-    alphabet = list("ACDEFGHIKLMNPQRSTVWY")
-    seq = seq.strip()
+protein_alphabet = "ACDEFGHIKLMNPQRSTVWY"
+dna_alphabet = "ATGC"
+rna_alphabet = "AUGC"
+
+def isCorrectSequence(sequence, alphabet):
+    alphabet = list(alphabet)
+    seq = sequence.strip()
     for i in range(0,len(seq)):
         if seq[i] not in alphabet:
             return False
     return True
 
-def parseReference(amino_acids, referencePath):
+def loadReference(referencePath):
+    molecules = {}
+    for file in os.listdir(referencePath):
+        name = os.path.splitext(file)[0]
+        molecules[name] = open(os.path.join(referencePath, file),"r",encoding="utf-8").readlines()
+    return molecules
+
+def parseReference(sequence, monomers, isCharged):
     atoms = []
     bonds = []
     counts = []
     #get all atoms and bonds of future peptide from reference file
     #reference files have to named after one-letter name amino acid and be "mol" format
-    for acid in amino_acids:
-        ref_name = acid + ".mol"
-        ref = open(os.path.join(referencePath,ref_name),"r",encoding="utf-8").readlines()
+    charged_aminoacids = list("DEHKR")
+    for s in sequence:
+        if isCharged and s in charged_aminoacids:
+            s += "-charge"
+        ref = monomers[s]
         f = False
         f1 = False
         tmp_atoms = []
@@ -129,7 +141,7 @@ def shiftBonds(bonds,shift_atoms):
     return shifted_bond
 
 
-#increase x coordinate for nice view and renumber atoms.
+#increase x coordinate for nice view and renumber atoms. DEPRECATED
 def niceView(shift_atoms):
     ready_atom = copy.deepcopy(shift_atoms)
     shift_num = len(shift_atoms[0])+1
@@ -176,9 +188,9 @@ def generateCounts(ready_atoms,ready_bonds):
     return edit_count
 
 #write amino acid sequence as mol structure to sdf
-def writeStructure(out,seq, ref):
-    if isCorrectSequence(seq):
-        ref_atoms, ref_bonds, ref_counts = parseReference(seq,ref)
+def writeStructure(out,seq, ref,alphabet, isCharged):
+    if isCorrectSequence(seq,alphabet):
+        ref_atoms, ref_bonds, ref_counts = parseReference(seq,ref,isCharged)
         shift_atoms = shiftAtoms(ref_atoms)
         shift_bonds = shiftBonds(ref_bonds, shift_atoms)
         ready_atoms = niceView(shift_atoms)
@@ -206,9 +218,9 @@ def writeStructure(out,seq, ref):
         print("Check your sequence " + seq + ". It must be in first line and contain one-letter names of amino acids.")
         sys.exit(1)
 
-def writeRecord(out,tbl,i,seq_col,ref):
+def writeRecord(out,tbl,i,seq_col,ref,alphabet, isCharged):
     sequence = tbl.loc[i,seq_col]
-    writeStructure(out, sequence, ref)
+    writeStructure(out, sequence, ref,alphabet,isCharged)
     for c in tbl.columns:
         if c != seq_col:
             out.write(">  <" + c + ">\n")
@@ -239,21 +251,39 @@ def printProgressBar (iteration, total, prefix = '', suffix = '', decimals = 1, 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("reference", help="directory containing reference mol files with amino acids")
+    parser.add_argument("--reference", help="directory containing reference mol files with amino acids", default=os.path.join(os.getcwd(), "reference"))
     parser.add_argument("input", help="path to csv file with records")
     parser.add_argument("output", help="path to output SDF")
     parser.add_argument("sequence",help = "Column name with sequences. They will be transformed into mol format")
+    parser.add_argument("--isCharged", help="Should it use charged forms of aminoacids", required = False,default=False)
+    parser.add_argument("--alphabet", help="Which alphabet should it use. It supports three alphabets: \"protein\", \"dna\", \"rna\"", choices= ["protein","dna","rna"],default="protein")
     args = parser.parse_args()
 
     referencePath = args.reference
-    database = pd.read_csv(args.input,sep = ";",header = 0)
+    database = pd.read_csv(args.input,sep = ",",header = 0)
     sequence = str(args.sequence).strip()
-    all = len(database.index)
+    isCharged = args.isCharged
+
+    if args.alphabet == "protein":
+        alphabet = protein_alphabet
+    elif args.alphabet == "dna":
+        alphabet = dna_alphabet
+    elif args.alphabet == "rna":
+        alphabet = rna_alphabet
+    else:
+        print("Incorrect alphabet " + str(args.alphabet))
+        sys.exit(1)
+
+    monomers = loadReference(referencePath)
+
+
+
+    total = len(database.index)
     j = 0
-    printProgressBar(j, all, prefix = 'Progress:', suffix = 'Complete', length = 50)
+    printProgressBar(j, total, prefix ='Progress:', suffix ='Complete', length = 50)
     with open(args.output, "w", encoding="utf-8") as out:
-        printProgressBar(j, all, prefix = 'Progress:', suffix = 'Complete', length = 50)
+        printProgressBar(j, total, prefix ='Progress:', suffix ='Complete', length = 50)
         for i in database.index:
-            writeRecord(out,database,i,sequence,referencePath)
+            writeRecord(out,database,i,sequence,monomers,alphabet,isCharged)
             j = j + 1
-            printProgressBar(j, all, prefix = 'Progress:', suffix = 'Complete', length = 50)
+            printProgressBar(j, total, prefix ='Progress:', suffix ='Complete', length = 50)
