@@ -1,0 +1,10 @@
+{
+  "input": "/home/stotoshka/PycharmProjects/SequenceToSDF/test_samples/test_1000.csv",
+  "output": "/home/stotoshka/PycharmProjects/SequenceToSDF/benchmark",
+  "column": "cdr3_seq",
+  "charged": true,
+  "alphabet": "protein",
+  "threads": 10,
+  "separator": ";",
+  "filename": "1000"
+}
