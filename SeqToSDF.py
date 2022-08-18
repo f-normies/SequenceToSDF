@@ -135,7 +135,6 @@ if __name__ == '__main__':
                 input = parameters["input"]
                 output = parameters["output"]
                 sequence_column = parameters["column"]
-                referencePath = parameters["reference"]
 
                 if "charged" in parameters.keys():
                     isCharged = parameters["charged"]
