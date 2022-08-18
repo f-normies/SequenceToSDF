@@ -1,24 +1,20 @@
+#! /usr/bin/env python
+# -*- coding: utf-8 -*-
 """
 Created on Sun Aug 14 18:05 2022
 
 @author: SmirnygaTotoshka
 """
 
-#! /usr/bin/env python
-# -*- coding: utf-8 -*-
-#generate sdf file containing peptide with input sequence
-#reference file must be special,ask it to author, they should be with script
+
 import argparse
 import json
 import os
 import traceback
 import multiprocessing
 import time
-import re
 import sys
-import copy
 import pandas as pd
-from rdkit.Chem import AllChem
 from rdkit import Chem
 
 alphabets = {"protein" : list("ACDEFGHIKLMNPQRSTVWY"),
@@ -214,6 +210,8 @@ if __name__ == '__main__':
             # завершат свою работу.
             for p in processes:
                 p.join()
+
+            # Merge all
 
             sdf = os.path.join(output, output_filename + ".sdf")
             total_log = os.path.join(output, output_filename + "_log" + ".txt")
