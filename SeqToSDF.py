@@ -4,6 +4,11 @@
 Created on Sun Aug 14 18:05 2022
 
 @author: SmirnygaTotoshka
+
+@version 1.1
+
+add delete temp files creating by threads
+TODO need test
 """
 
 
@@ -160,6 +165,11 @@ if __name__ == '__main__':
                     output_filename = parameters["filename"]
                 else:
                     output_filename = os.path.splitext(os.path.basename(input))[0]
+                    
+                if "delete_tmp" in parameters.keys():
+                    delete_tmp = parameters["delete_tmp"]
+                else:
+                    delete_tmp = True
 
                 '''
                       Validate arguments
@@ -224,6 +234,10 @@ if __name__ == '__main__':
                         final.write("".join(o.readlines()))
                         log.write("".join(l.readlines()))
                         failed.write("".join(f.readlines()))
+                    if delete_tmp:
+                        os.remove(out_t)
+                        os.remove(log_t)
+                        os.remove(fail_t)
             print("Success")
         except BaseException as e:
             print("Something went wrong\n")
