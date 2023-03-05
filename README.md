@@ -33,7 +33,7 @@ Config is JSON file with script parameters. Here is description.
 5. Separator is CSV separartor. 
 6. Filename is custom name for output sdf, otherwise it will be named by csv file.
 
-##Default parameters values
+## Default parameters values
 
 1. charged = true
 2. alphabet = "protein"
