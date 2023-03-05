@@ -20,6 +20,7 @@ Config is JSON file with script parameters. Here is description.
   "threads": 10, 
   "separator": ";", 
   "filename": "1000" 
+  "delete_tmp": true
 }
 ```
 
@@ -31,3 +32,12 @@ Config is JSON file with script parameters. Here is description.
 4. Threads is number between 1 and 2 * number of cores.
 5. Separator is CSV separartor. 
 6. Filename is custom name for output sdf, otherwise it will be named by csv file.
+
+##Default parameters values
+
+1. charged = true
+2. alphabet = "protein"
+3. threads = 1
+4. separator = ";"
+5. filename = input_file_name
+6. delete_tmp = true
