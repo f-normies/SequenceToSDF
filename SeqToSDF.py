@@ -7,8 +7,6 @@ Created on Sun Aug 14 18:05 2022
 
 @version 1.1
 
-add delete temp files creating by threads
-TODO need test
 """
 
 
@@ -178,7 +176,7 @@ if __name__ == '__main__':
                 if not os.path.exists(input) or not os.path.isfile(input):
                     raise BaseException("Input file doesn`t exist or it isn`t file.")
                 else:
-                    table = pd.read_csv(input, sep=separator, header=0)
+                    table = pd.read_csv(input, sep=separator, header=0, na_values="", keep_default_na=False)
                     if sequence_column not in table.columns:
                         raise BaseException("Table doesn`t contain such column.")
 
@@ -241,7 +239,7 @@ if __name__ == '__main__':
             print("Success")
         except BaseException as e:
             print("Something went wrong\n")
-            traceback.print_exc()
+            traceback.print_exc(file=sys.stdout)
             sys.exit(1)
         finally:
             end_time = time.time()
