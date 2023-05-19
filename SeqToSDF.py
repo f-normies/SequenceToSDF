@@ -1,7 +1,10 @@
-#! /usr/bin/env python
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 Created on Sun Aug 14 18:05 2022
+
+This script converts csv table to a Structure Data File (SDF)
+input - json config. see - https://github.com/SmirnygaTotoshka/SequenceToSDF
 
 @author: SmirnygaTotoshka
 
@@ -104,12 +107,12 @@ def write(proc, partition, output, sequence_column, isCharged, alphabet, output_
                         f.write(str(i) + "\t" + partition.loc[i, sequence_column] + "\n")
                 except Exception as er:
                     l.write("Exception on record #" + str(i) + "\t" + partition.loc[i, sequence_column] + "\n")
-                    traceback.print_exc()
                     l.write(str(er) + "\n")
                     f.write(str(i) + "\t" + partition.loc[i, sequence_column] + "\n")
+                    traceback.print_exc()
                 finally:
                     l.write("-------------------------------------------------\n")
-    except BaseException as e:
+    except Exception as e:
         print("Something went wrong in thread #" + str(proc)+"\n")
         traceback.print_exc()
         sys.exit(1)
@@ -192,8 +195,8 @@ if __name__ == '__main__':
                 if number_threads < 1 or number_threads > 2 * multiprocessing.cpu_count():
                     raise BaseException("Too many threads. Please use from 1 to " + str(2 * multiprocessing.cpu_count()) + " threads.")
 
-
             total = len(table.index)
+            number_threads = min(number_threads, total)
             size_part = total // number_threads
             size_last_part = size_part + (total - size_part * number_threads)
 
