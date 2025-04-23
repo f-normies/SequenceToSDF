@@ -1,0 +1,11 @@
+{
+  "input": "path/to/input.csv", 
+  "output": "path/to/output/directory", 
+  "column": "column_with_sequences",
+  "charged": true, 
+  "alphabet": "protein", 
+  "threads": 10, 
+  "separator": ",", 
+  "filename": "output_name",
+  "delete_tmp": true
+}

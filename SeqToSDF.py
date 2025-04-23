@@ -1,17 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
-Created on Sun Aug 14 18:05 2022
-
-This script converts csv table to a Structure Data File (SDF)
-input - json config. see - https://github.com/SmirnygaTotoshka/SequenceToSDF
-
-@author: SmirnygaTotoshka
-
-@version 1.1
 
 """
-
+Converts CSV table to a Structure Data File (SDF)
+input - json config
+@author: SmirnygaTotoshka, f-normies
+@version 2.0
+"""
 
 import argparse
 import json
@@ -22,235 +17,265 @@ import time
 import sys
 import pandas as pd
 from rdkit import Chem
+from concurrent.futures import ProcessPoolExecutor
+import logging
 
-alphabets = {"protein" : list("ACDEFGHIKLMNPQRSTVWY"),
-             "DNA" : list("ATGC"),
-             "RNA" : list("AUGC")}
+# Оптимизация - используем множества для быстрой проверки символов
+ALPHABETS = {
+    "protein": set("ACDEFGHIKLMNPQRSTVWY"),
+    "DNA": set("ATGC"),
+    "RNA": set("AUGC")
+}
+
+# Кэшируем SMARTS-шаблоны для однократного создания
+CARBOXYL = Chem.MolFromSmarts('C(=O)O')
+LYSINE = Chem.MolFromSmarts('C(CCN)C[C@@H](C(=O))')
+IMYDAZOLINE = Chem.MolFromSmarts('c1cnc[nH]1')
+GUANIDINE = Chem.MolFromSmarts('NC(N)=N')
+
+def setup_logging(output_dir, filename, thread_id):
+    os.makedirs(output_dir, exist_ok=True)
+    log_file = os.path.join(output_dir, f"{filename}_thread_{thread_id}_log.txt")
+    
+    logger = logging.getLogger(f"thread_{thread_id}")
+    logger.setLevel(logging.INFO)
+    
+    if not logger.handlers:
+        handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+        formatter = logging.Formatter('%(asctime)s - %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    
+    return logger
 
 def isCorrectSequence(sequence, alphabet):
     seq = sequence.strip()
-    for i in range(0,len(seq)):
-        if seq[i] not in alphabet:
-            return False
-    return True
+    alphabet_set = ALPHABETS[alphabet]
+    return all(c in alphabet_set for c in seq)
 
 def chargePeptide(mol):
-    carboxyl = Chem.MolFromSmarts('C(=O)O')# aspartate and glutamate
-    lysine = Chem.MolFromSmarts('C(CCN)C[C@@H](C(=O))')
-    imydazoline = Chem.MolFromSmarts('c1cnc[nH]1') # histidine
-    guanidine = Chem.MolFromSmarts('NC(N)=N') # arginine
+    mol.GetAtomWithIdx(0).SetFormalCharge(1)  # charge N end of peptide
 
-    mol.GetAtomWithIdx(0).SetFormalCharge(1) # charge N end of peptide
-
-    carboxyl_groups_pos = list(mol.GetSubstructMatches(carboxyl))
-
-    if len(carboxyl_groups_pos) != 0:
+    carboxyl_groups_pos = list(mol.GetSubstructMatches(CARBOXYL))
+    if carboxyl_groups_pos:
         for g in carboxyl_groups_pos:
-            atoms_pos = list(g)
-            mol.GetAtomWithIdx(atoms_pos[2]).SetFormalCharge(-1)
+            mol.GetAtomWithIdx(g[2]).SetFormalCharge(-1)
 
-    lysine_groups_pos = list(mol.GetSubstructMatches(lysine))
-
-    if len(lysine_groups_pos) != 0:
+    lysine_groups_pos = list(mol.GetSubstructMatches(LYSINE))
+    if lysine_groups_pos:
         for g in lysine_groups_pos:
-            atoms_pos = list(g)
-            mol.GetAtomWithIdx(atoms_pos[3]).SetFormalCharge(1)
+            mol.GetAtomWithIdx(g[3]).SetFormalCharge(1)
 
-    imydazoline_groups_pos = list(mol.GetSubstructMatches(imydazoline))
-
-    if len(imydazoline_groups_pos) != 0:
+    imydazoline_groups_pos = list(mol.GetSubstructMatches(IMYDAZOLINE))
+    if imydazoline_groups_pos:
         for g in imydazoline_groups_pos:
-            atoms_pos = list(g)
-            mol.GetAtomWithIdx(atoms_pos[4]).SetFormalCharge(1)
+            mol.GetAtomWithIdx(g[4]).SetFormalCharge(1)
 
-    guanidine_groups_pos = list(mol.GetSubstructMatches(guanidine))
-
-    if len(guanidine_groups_pos) != 0:
+    guanidine_groups_pos = list(mol.GetSubstructMatches(GUANIDINE))
+    if guanidine_groups_pos:
         for g in guanidine_groups_pos:
-            atoms_pos = list(g)
-            mol.GetAtomWithIdx(atoms_pos[3]).SetFormalCharge(1)
+            mol.GetAtomWithIdx(g[3]).SetFormalCharge(1)
 
 def write(proc, partition, output, sequence_column, isCharged, alphabet, output_filename):
-    out = os.path.join(output, output_filename + "_thread_" + str(proc) + ".sdf")
-    log = os.path.join(output, output_filename + "_thread_" + str(proc) + "_log" + ".txt")
-    fail = os.path.join(output, output_filename + "_thread_" + str(proc) + "_failed" + ".txt")
+    logger = setup_logging(output, output_filename, proc)
+    out = os.path.join(output, f"{output_filename}_thread_{proc}.sdf")
+    fail = os.path.join(output, f"{output_filename}_thread_{proc}_failed.txt")
+    
     try:
-        with open(out, "w", encoding="utf-8") as o, open(log, "w", encoding="utf-8") as l, open(fail, "w", encoding="utf-8") as f:
-            l.write("Start thread #" + str(proc) + " " + str(time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())) + '\n' + "-------------------------------------------------\n")
+        with open(out, "w", encoding="utf-8") as o, open(fail, "w", encoding="utf-8") as f:
+            logger.info(f"Start thread #{proc}")
+            
             for i in partition.index:
                 try:
-                    l.write("Convert record #" + str(i) + " " + str(time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())) + "\n")
-                    if isCorrectSequence(partition.loc[i, sequence_column], alphabets[alphabet]):
-
-                        if alphabet == "protein":
-                            flavor = 0
-                        elif alphabet == "DNA":
-                            flavor = 2
-                        else:
-                            flavor = 6
-
-                        molecule = Chem.MolFromSequence(partition.loc[i, sequence_column],flavor = flavor)
+                    logger.info(f"Convert record #{i}")
+                    
+                    if isCorrectSequence(partition.loc[i, sequence_column], alphabet):
+                        flavor = {"protein": 0, "DNA": 2, "RNA": 6}.get(alphabet, 0)
+                        
+                        molecule = Chem.MolFromSequence(partition.loc[i, sequence_column], flavor=flavor)
                         molecule.SetProp('_Name', partition.loc[i, sequence_column])
-                        molecule.SetProp('MolFileInfo',"Generated by the script of A. Smirnov, Dept. Bioinformatics, Pirogov RNRMU.")
+                        molecule.SetProp('MolFileInfo', "Generated by the modified script of A. Smirnov, Dept. Bioinformatics, Pirogov RNRMU.")
+                        
                         if isCharged and alphabet == "protein":
                             chargePeptide(molecule)
 
-                        o.write(Chem.MolToMolBlock(molecule, forceV3000 = True)+"\n")
+                        o.write(Chem.MolToMolBlock(molecule, forceV3000=True) + "\n")
+                        
                         for c in partition.columns:
                             if c != sequence_column:
-                                o.write(">  <" + c + ">\n")
-                                o.write(str(partition.loc[i, c]) + "\n\n")
+                                o.write(f">  <{c}>\n")
+                                o.write(f"{partition.loc[i, c]}\n\n")
+                        
                         o.write("$$$$\n")
-                        l.write("SUCCESS!\n")
+                        logger.info("SUCCESS!")
                     else:
-                        l.write("FAILED!\n")
-                        f.write(str(i) + "\t" + partition.loc[i, sequence_column] + "\n")
+                        logger.info("FAILED!")
+                        f.write(f"{i}\t{partition.loc[i, sequence_column]}\n")
+                
                 except Exception as er:
-                    l.write("Exception on record #" + str(i) + "\t" + partition.loc[i, sequence_column] + "\n")
-                    l.write(str(er) + "\n")
-                    f.write(str(i) + "\t" + partition.loc[i, sequence_column] + "\n")
+                    logger.error(f"Exception on record #{i}\t{partition.loc[i, sequence_column]}")
+                    logger.error(str(er))
+                    f.write(f"{i}\t{partition.loc[i, sequence_column]}\n")
                     traceback.print_exc()
-                finally:
-                    l.write("-------------------------------------------------\n")
+    
     except Exception as e:
-        print("Something went wrong in thread #" + str(proc)+"\n")
+        logger.error(f"Something went wrong in thread #{proc}")
+        logger.error(str(e))
         traceback.print_exc()
         sys.exit(1)
 
-if __name__ == '__main__':
+def merge_files(output, output_filename, number_threads, delete_tmp=True):
+    buffer_size = 1024 * 1024  # 1MB буфер
+    
+    sdf = os.path.join(output, f"{output_filename}.sdf")
+    total_log = os.path.join(output, f"{output_filename}_log.txt")
+    total_fail = os.path.join(output, f"{output_filename}_failed.txt")
+    
+    with open(sdf, "w", encoding="utf-8") as final, \
+         open(total_log, "w", encoding="utf-8") as log, \
+         open(total_fail, "w", encoding="utf-8") as failed:
+        
+        for i in range(number_threads):
+            out_t = os.path.join(output, f"{output_filename}_thread_{i}.sdf")
+            log_t = os.path.join(output, f"{output_filename}_thread_{i}_log.txt")
+            fail_t = os.path.join(output, f"{output_filename}_thread_{i}_failed.txt")
+            
+            # Копируем содержимое SDF файла
+            if os.path.exists(out_t):
+                with open(out_t, "r", encoding="utf-8") as o:
+                    while True:
+                        chunk = o.read(buffer_size)
+                        if not chunk:
+                            break
+                        final.write(chunk)
+            
+            # Копируем содержимое лог-файла
+            if os.path.exists(log_t):
+                with open(log_t, "r", encoding="utf-8") as l:
+                    while True:
+                        chunk = l.read(buffer_size)
+                        if not chunk:
+                            break
+                        log.write(chunk)
+            
+            # Копируем содержимое файла с ошибками
+            if os.path.exists(fail_t):
+                with open(fail_t, "r", encoding="utf-8") as f:
+                    while True:
+                        chunk = f.read(buffer_size)
+                        if not chunk:
+                            break
+                        failed.write(chunk)
+            
+            # Удаляем временные файлы
+            if delete_tmp:
+                for file_path in [out_t, log_t, fail_t]:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
 
-    '''
-        Path to config file
-    '''
+def validate_config(parameters):
+    required = ["input", "output", "column"]
+    
+    for param in required:
+        if param not in parameters:
+            raise ValueError(f"Missing required parameter: {param}")
+    
+    if not os.path.exists(parameters["input"]) or not os.path.isfile(parameters["input"]):
+        raise FileNotFoundError(f"Input file doesn't exist or it isn't a file: {parameters['input']}")
+    
+    if not os.path.exists(parameters["output"]):
+        raise FileNotFoundError(f"Output directory doesn't exist: {parameters['output']}")
+    
+    # Проверяем опциональные параметры и устанавливаем значения по умолчанию
+    parameters.setdefault("charged", True)
+    parameters.setdefault("alphabet", "protein")
+    parameters.setdefault("threads", 1)
+    parameters.setdefault("separator", ";")
+    parameters.setdefault("delete_tmp", True)
+    
+    if "filename" not in parameters:
+        parameters["filename"] = os.path.splitext(os.path.basename(parameters["input"]))[0]
+    
+    if parameters["alphabet"] not in ALPHABETS:
+        raise ValueError(f"Invalid alphabet. Allow only {list(ALPHABETS.keys())}")
+    
+    max_threads = 2 * multiprocessing.cpu_count()
+    if parameters["threads"] < 1 or parameters["threads"] > max_threads:
+        raise ValueError(f"Invalid thread count. Please use from 1 to {max_threads} threads.")
+    
+    return parameters
+
+def main():
     start_time = time.time()
+    
     parser = argparse.ArgumentParser()
     parser.add_argument("config", help="Path to config file.")
     args = parser.parse_args()
-
-    config = args.config
-
-    if os.path.exists(config):
-        try:
-            with open(config,"r") as cfg:
-
-                '''
-                    Parsing arguments
-                '''
-                parameters = json.loads(''.join(cfg.readlines()))
-
-                input = parameters["input"]
-                output = parameters["output"]
-                sequence_column = parameters["column"]
-
-                if "charged" in parameters.keys():
-                    isCharged = parameters["charged"]
-                else:
-                    isCharged = False
-
-                if "alphabet" in parameters.keys():
-                    alphabet = parameters["alphabet"]
-                else:
-                    alphabet = "protein"
-
-                if "threads" in parameters.keys():
-                    number_threads = parameters["threads"]
-                else:
-                    number_threads = 1
-
-                if "separator" in parameters.keys():
-                    separator = parameters["separator"]
-                else:
-                    separator = ";"
-
-                if "filename" in parameters.keys():
-                    output_filename = parameters["filename"]
-                else:
-                    output_filename = os.path.splitext(os.path.basename(input))[0]
-                    
-                if "delete_tmp" in parameters.keys():
-                    delete_tmp = parameters["delete_tmp"]
-                else:
-                    delete_tmp = True
-
-                '''
-                      Validate arguments
-                '''
-
-                if not os.path.exists(input) or not os.path.isfile(input):
-                    raise BaseException("Input file doesn`t exist or it isn`t file.")
-                else:
-                    table = pd.read_csv(input, sep=separator, header=0, na_values="", keep_default_na=False)
-                    if sequence_column not in table.columns:
-                        raise BaseException("Table doesn`t contain such column.")
-
-                if not os.path.exists(output):
-                    raise BaseException("Output directory doesn`t exist.")
-
-                if type(isCharged) != bool:
-                    raise BaseException("Which type amino acids residues it should use?")
-
-                if alphabet not in alphabets.keys():
-                    raise BaseException("Invalid alphabet. Allow only " + str(list(alphabets.keys())))
-
-                if number_threads < 1 or number_threads > 2 * multiprocessing.cpu_count():
-                    raise BaseException("Too many threads. Please use from 1 to " + str(2 * multiprocessing.cpu_count()) + " threads.")
-
-            total = len(table.index)
-            number_threads = min(number_threads, total)
-            size_part = total // number_threads
-            size_last_part = size_part + (total - size_part * number_threads)
-
-            # procs - количество ядер
-            # calc - количество операций на ядро
-
-            processes = []
-
-            # делим вычисления на количество ядер
+    
+    if not os.path.exists(args.config):
+        print("Config doesn't exist.")
+        sys.exit(1)
+    
+    try:
+        with open(args.config, "r") as cfg:
+            parameters = json.loads(''.join(cfg.readlines()))
+        
+        parameters = validate_config(parameters)
+        
+        input_file = parameters["input"]
+        output_dir = parameters["output"]
+        sequence_column = parameters["column"]
+        isCharged = parameters["charged"]
+        alphabet = parameters["alphabet"]
+        number_threads = parameters["threads"]
+        separator = parameters["separator"]
+        output_filename = parameters["filename"]
+        delete_tmp = parameters["delete_tmp"]
+        
+        # Читаем таблицу и проверяем наличие нужного столбца
+        table = pd.read_csv(input_file, sep=separator, header=0, na_values="", keep_default_na=False)
+        
+        if sequence_column not in table.columns:
+            raise ValueError(f"Table doesn't contain column: {sequence_column}")
+        
+        # Распределяем работу между потоками
+        total = len(table.index)
+        number_threads = min(number_threads, total)
+        size_part = total // number_threads
+        size_last_part = size_part + (total - size_part * number_threads)
+        
+        with ProcessPoolExecutor(max_workers=number_threads) as executor:
+            futures = []
+            
             for proc, start in zip(range(number_threads), range(0, total, size_part)):
                 if proc == number_threads - 1:
                     partition = table[start:start + size_last_part]
                 else:
                     partition = table[start:start + size_part]
-
-                p = multiprocessing.Process(target=write, args=(proc, partition, output, sequence_column, isCharged, alphabet, output_filename))
-                processes.append(p)
-                p.start()
-
-            # Ждем, пока все ядра
-            # завершат свою работу.
-            for p in processes:
-                p.join()
-
-            # Merge all
-
-            sdf = os.path.join(output, output_filename + ".sdf")
-            total_log = os.path.join(output, output_filename + "_log" + ".txt")
-            total_fail = os.path.join(output, output_filename + "_failed" + ".txt")
-            with open(sdf, "w", encoding="utf-8") as final, open(total_log, "w", encoding="utf-8") as log, open(total_fail, "w",encoding="utf-8") as failed:
-                for i in range(number_threads):
-                    out_t = os.path.join(output, output_filename + "_thread_" + str(i) + ".sdf")
-                    log_t = os.path.join(output, output_filename + "_thread_" + str(i) + "_log" + ".txt")
-                    fail_t = os.path.join(output, output_filename + "_thread_" + str(i) + "_failed" + ".txt")
-                    with open(out_t, "r", encoding="utf-8") as o, open(log_t, "r", encoding="utf-8") as l, open(fail_t, "r", encoding="utf-8") as f:
-                        final.write("".join(o.readlines()))
-                        log.write("".join(l.readlines()))
-                        failed.write("".join(f.readlines()))
-                    if delete_tmp:
-                        os.remove(out_t)
-                        os.remove(log_t)
-                        os.remove(fail_t)
-            print("Success")
-        except BaseException as e:
-            print("Something went wrong\n")
-            traceback.print_exc(file=sys.stdout)
-            sys.exit(1)
-        finally:
-            end_time = time.time()
-            print("--- %s seconds ---" % (end_time - start_time))
-    else:
-        print("Config doesn`t exist.")
-        end_time = time.time()
-        print("--- %s seconds ---" % (end_time - start_time))
+                
+                future = executor.submit(
+                    write, proc, partition, output_dir, sequence_column, 
+                    isCharged, alphabet, output_filename
+                )
+                futures.append(future)
+            
+            # Ждем завершения всех задач
+            for future in futures:
+                future.result()
+        
+        # Объединяем результаты всех потоков
+        merge_files(output_dir, output_filename, number_threads, delete_tmp)
+        
+        print("Success")
+    
+    except Exception as e:
+        print("Something went wrong")
+        traceback.print_exc(file=sys.stdout)
         sys.exit(1)
+    
+    finally:
+        end_time = time.time()
+        print(f"--- {end_time - start_time:.2f} seconds ---")
 
-
+if __name__ == '__main__':
+    main()
